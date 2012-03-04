@@ -1,0 +1,147 @@
+#!/bin/bash -
+#===============================================================================
+#
+#          FILE: photobucket-downloader
+#
+#         USAGE: ./photobucket-downloader URL of Bucket
+#
+#   DESCRIPTION: Script to Download PhotoBucket Bucket's
+#
+#  REQUIREMENTS: lynx, wget or aria2c (faster downloading), zip if you want
+#                automatic zipping, sed and other standard utils.
+#        AUTHOR: Stephen Kane (khedron@gmx.com)
+#       CREATED: 03/03/12 23:50:45 GMT
+#      REVISION: v1.0
+#       LICENSE: GPL v3
+#===============================================================================
+#-------------------------------------------------------------------------------
+#  Configuration.
+#-------------------------------------------------------------------------------
+
+DOWNLOADDIR=~/Photos/Photobucket #Set to where you want it to download to.
+ZIPFILES="False" #Auto creates a zip file, set to true or false.
+
+#-------------------------------------------------------------------------------
+# Global Variables.
+#-------------------------------------------------------------------------------
+
+TMPDIR=$(mktemp -d /tmp/pbl.XXXXXXXXXX) || exit 1
+USERNAME=$(printf "$1" | cut -d/ -f6- | sed s/"\/.*"//g)
+INDEX="$(printf ${USERNAME^^} | cut -b1)"
+USERAGENT="Opera/9.80 (X11; Linux x86_64; U; en-GB) Presto/2.10.229 Version/11.61"
+ZIPDIR="Zipped"
+
+#-------------------------------------------------------------------------------
+# Check if we were Called Properly.
+#-------------------------------------------------------------------------------
+
+if [[ -z "$1" ]]; then
+  printf "Usage: photobucket-downloader Bucket URL" >&2
+  exit 1
+fi
+
+#-------------------------------------------------------------------------------
+# Locate Binaries and Fail if Not Found.
+#-------------------------------------------------------------------------------
+
+LYNX="$(which lynx)"
+ARIA2="$(which aria2c)"
+WGET="$(which wget)"
+ZIP="$(which zip)"
+
+if [[ ! -x "$LYNX" ]]; then
+  printf "ERROR: lynx not installed" >&2
+  exit 1
+fi
+
+if [[ -x "$ARIA2" ]]; then
+  DOWNLOADER="aria2c --quiet=true --user-agent="$USERAGENT""
+  elif [[ -x "$WGET" ]]; then
+  DOWNLOADER="wget -q --user-agent="$USERAGENT""
+else
+  printf "ERROR: Neither aria2 or wget installed"
+  exit 1
+fi
+
+if [[ $ZIPFILES == "True" ]] && [[ -z $ZIP ]]; then
+  printf "ERROR: Zip is not installed"
+  exit 1
+fi
+
+#-------------------------------------------------------------------------------
+# Functions.
+#-------------------------------------------------------------------------------
+
+makezipdir(){
+  if [[ ! -d "$DOWNLOADDIR/$ZIPDIR" ]]; then
+    mkdir -p "$DOWNLOADDIR/$ZIPDIR"
+  fi
+}
+
+splitformats(){
+  if [[ -e "$TMPDIR/dump.html" ]]; then
+    cat "$TMPDIR/dump.html" | grep -i -e jpg -e png -e gif | grep -o "http:.*" | sed "s/?action=view&current=//g" > "$TMPDIR/images.txt" && \
+    cat "$TMPDIR/dump.html" | grep -i -e mp4 | grep -o "http:.*" | sed "s/?action=view&current=//g" > "$TMPDIR/videos.txt"
+  fi
+}
+
+#-------------------------------------------------------------------------------
+# Setup Directories.
+#-------------------------------------------------------------------------------
+
+if [[ ! -d "$DOWNLOADDIR/$INDEX/$USERNAME" ]]; then
+  mkdir -p "$DOWNLOADDIR/$INDEX/$USERNAME"
+fi
+
+if [[ "$ZIPFILES" == "True" ]]; then
+  makezipdir
+fi
+
+#-------------------------------------------------------------------------------
+#  Download files
+#-------------------------------------------------------------------------------
+
+$LYNX -dump "$1" > "$TMPDIR/dump.html"
+splitformats
+if [[ -s "$TMPDIR/images.txt" ]]; then
+  mkdir -p "$DOWNLOADDIR/$INDEX/$USERNAME/Images"
+  cd "$DOWNLOADDIR/$INDEX/$USERNAME/Images"
+  $DOWNLOADER -i "$TMPDIR/images.txt"
+fi
+
+if [[ -s "$TMPDIR/videos.txt" ]]; then
+  mkdir -p "$DOWNLOADDIR/$INDEX/$USERNAME/Videos"
+  cd "$DOWNLOADDIR/$INDEX/$USERNAME/Videos"
+  $DOWNLOADER --quiet=true -i "$TMPDIR/videos.txt"
+fi
+
+printf "Finished Downloading Files\n"
+
+#-------------------------------------------------------------------------------
+# Zip files if needed
+#-------------------------------------------------------------------------------
+
+if [[ "$ZIPFILES" == "True" ]]; then
+  printf "Zipping: "$USERNAME\n""
+  zip "-9rq" "$DOWNLOADDIR/$ZIPDIR/$USERNAME.zip" "$DOWNLOADDIR/$INDEX/$USERNAME/"
+  printf "Done\n"
+fi
+
+#-------------------------------------------------------------------------------
+# Cleanup and exit
+#-------------------------------------------------------------------------------
+
+rm --recursive --force $TMPDIR
+
+if [[ -d "$DOWNLOADDIR/$INDEX/$USERNAME/Images/" ]]; then
+	PHOTOS="$(cd "$DOWNLOADDIR/$INDEX/$USERNAME/Images/" | ls | wc -l)"
+fi
+
+if [[ -d "$DOWNLOADDIR/$INDEX/$USERNAME/Videos/" ]]; then
+	VIDEOS="$(cd "$DOWNLOADDIR/$INDEX/$USERNAME/Videos/" | ls | wc -l)"
+fi
+
+printf "All Done: $PHOTOS Photos Downloaded and $VIDEOS Videos Downloaded\n"
+
+exit 0
+
